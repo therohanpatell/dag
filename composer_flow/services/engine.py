@@ -17,18 +17,17 @@ Algorithm (event-driven Kahn scheduler):
      so a crash at any point leaves a consistent, resumable record.
 
 Threading model: the engine runs in one background thread; blocking gcloud
-calls run in a worker pool sized by max_parallel_dags. UI communication is
-Qt signals only (auto-queued across threads) — the engine never touches
-widgets.
+calls run in a worker pool sized by max_parallel_dags. UI communication is a
+thread-safe event queue (see services/events.py) — the engine never touches
+any GUI toolkit, so the same engine drives both the Streamlit and Qt front-ends.
 """
 from __future__ import annotations
 
+import queue
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-
-from PySide6.QtCore import QObject, Signal
 
 from composer_flow.core import graph as g
 from composer_flow.models.execution import (
@@ -39,6 +38,14 @@ from composer_flow.models.execution import (
 )
 from composer_flow.models.workflow import Workflow, utc_now_iso
 from composer_flow.persistence.repositories import ExecutionRepository
+from composer_flow.services.events import (
+    ETA,
+    FINISHED,
+    LOG,
+    NODE_STATUS,
+    PROGRESS,
+    EngineEvent,
+)
 from composer_flow.services.gcloud import (
     CommandResult,
     ComposerTarget,
@@ -59,14 +66,12 @@ class EngineConfig:
     max_parallel: int = 4
 
 
-class WorkflowEngine(QObject):
-    """One instance per workflow run. Create -> connect signals -> start()."""
+class WorkflowEngine:
+    """One instance per workflow run. Create -> start(); consume `events`.
 
-    node_status_changed = Signal(str, str)          # node_id, NodeStatus value
-    log_message = Signal(str, str)                  # level, message
-    progress_changed = Signal(int, int)             # finished_terminal, total
-    eta_changed = Signal(str)                       # human-readable ETA text
-    execution_finished = Signal(str, str)           # WorkflowStatus value, error
+    All state changes are published as EngineEvent objects on the thread-safe
+    `events` queue. Front-ends drain it and never reach into the engine.
+    """
 
     def __init__(
         self,
@@ -76,9 +81,8 @@ class WorkflowEngine(QObject):
         config: EngineConfig,
         resume_execution_id: str | None = None,
         completed_node_ids: set[str] | None = None,
-        parent: QObject | None = None,
     ) -> None:
-        super().__init__(parent)
+        self.events: "queue.Queue[EngineEvent]" = queue.Queue()
         self.workflow = workflow
         self.gcloud = gcloud
         self.exec_repo = exec_repo
@@ -111,9 +115,12 @@ class WorkflowEngine(QObject):
 
     # -- helpers ---------------------------------------------------------
 
+    def _emit(self, event: EngineEvent) -> None:
+        self.events.put(event)
+
     def _log(self, level: str, message: str) -> None:
         getattr(log, level if level != "success" else "info")(message)
-        self.log_message.emit(level, message)
+        self._emit(EngineEvent(LOG, level=level, message=message))
 
     def _set_status(self, node_id: str, status: NodeStatus) -> None:
         """Persist first, then notify the UI (crash-consistent ordering)."""
@@ -130,13 +137,13 @@ class WorkflowEngine(QObject):
                 if started is not None:
                     rec.duration_seconds = round(time.monotonic() - started, 1)
             self.exec_repo.update_node(rec)
-        self.node_status_changed.emit(node_id, status.value)
+        self._emit(EngineEvent(NODE_STATUS, node_id=node_id, status=status.value))
         self._emit_progress()
 
     def _emit_progress(self) -> None:
         total = len(self.workflow.nodes)
         done = sum(1 for s in self._statuses.values() if s.is_terminal)
-        self.progress_changed.emit(done, total)
+        self._emit(EngineEvent(PROGRESS, done=done, total=total))
         self._emit_eta()
 
     def _emit_eta(self) -> None:
@@ -157,13 +164,13 @@ class WorkflowEngine(QObject):
             else:
                 remaining += avg
         if remaining <= 0 and unknown == 0:
-            self.eta_changed.emit("")
+            self._emit(EngineEvent(ETA, text=""))
             return
         mins, secs = divmod(int(remaining), 60)
         text = f"~{mins}m {secs:02d}s remaining"
         if unknown:
             text += f" (+{unknown} DAG(s) with no history)"
-        self.eta_changed.emit(text)
+        self._emit(EngineEvent(ETA, text=text))
 
     # -- main loop ---------------------------------------------------------
 
@@ -178,7 +185,8 @@ class WorkflowEngine(QObject):
                         self.execution_id, WorkflowStatus.FAILED, f"Engine error: {exc}"
                     )
             finally:
-                self.execution_finished.emit(WorkflowStatus.FAILED.value, str(exc))
+                self._emit(EngineEvent(FINISHED, status=WorkflowStatus.FAILED.value,
+                                       error=str(exc)))
 
     def _prepare_execution(self) -> None:
         wf = self.workflow
@@ -225,7 +233,7 @@ class WorkflowEngine(QObject):
             self.exec_repo.create_execution(execution, records)
 
         for node_id, status in self._statuses.items():
-            self.node_status_changed.emit(node_id, status.value)
+            self._emit(EngineEvent(NODE_STATUS, node_id=node_id, status=status.value))
         self._emit_progress()
 
     def _run_inner(self) -> None:
@@ -234,7 +242,7 @@ class WorkflowEngine(QObject):
         if issues:
             msg = "; ".join(i.message for i in issues)
             self._log("error", f"Validation failed: {msg}")
-            self.execution_finished.emit(WorkflowStatus.FAILED.value, msg)
+            self._emit(EngineEvent(FINISHED, status=WorkflowStatus.FAILED.value, error=msg))
             return
 
         self._prepare_execution()
@@ -324,7 +332,7 @@ class WorkflowEngine(QObject):
         )
         self._log(level, f"Workflow finished: {status.value.upper()}"
                           + (f" — {error}" if error else ""))
-        self.execution_finished.emit(status.value, error)
+        self._emit(EngineEvent(FINISHED, status=status.value, error=error))
 
     def _cancel_pending(self) -> None:
         for node_id, status in list(self._statuses.items()):

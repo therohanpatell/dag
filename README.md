@@ -1,12 +1,47 @@
 # ComposerFlow
 
-A production-grade Windows desktop application (single `.exe`) for visually
-designing and orchestrating **existing Apache Airflow DAGs in Google Cloud
-Composer 2.2**, using **only the Google Cloud CLI** (no Airflow UI, no Airflow
-REST API).
+A production-grade tool for visually designing and orchestrating **existing
+Apache Airflow DAGs in Google Cloud Composer 2.2**, using **only the Google
+Cloud CLI** (no Airflow UI, no Airflow REST API).
+
+The UI is a **local web app built on the Python standard library only** — no
+Streamlit, no web framework, no Node.js. It ships as a single Windows **`.exe`**:
+double-click it and it starts a tiny local HTTP server and opens your browser
+automatically. The canvas supports **mouse drag-to-connect** (drag from one DAG's
+port to another) via a vendored copy of Drawflow. Data lives in an embedded
+**SQLite** file; no external database, nothing to install.
 
 Think "Azure Data Factory pipeline canvas", but every activity is one of your
 existing Composer DAGs triggered via `gcloud composer environments run`.
+
+## Architecture at a glance
+
+```
+run_app.py (.exe entry) ──starts──▶ stdlib HTTP server ──opens──▶ browser
+        │                          (composer_flow/webapp/server.py)
+        │                                   │ serves
+        │                                   ▼
+        │                    static/ (index.html, app.js, styles.css,
+        │                             vendor/drawflow.min.js)  ← drag-to-connect
+        └── composer_flow/            (UI-framework-free backend, shared & tested)
+              ├── models/             Workflow, DagNode, Edge, execution records
+              ├── core/graph.py       validation, cycles, topological waves, ready-set
+              ├── services/
+              │     ├── gcloud.py     gcloud CLI wrapper (trigger / poll / auth / retries)
+              │     ├── engine.py     execution engine (threads) — emits EngineEvent
+              │     └── events.py     thread-safe event queue (no GUI toolkit)
+              ├── persistence/        SQLite (WAL) + Repository pattern
+              ├── webapp/             HTTP server + appstate + static frontend
+              └── theme.py            single teal/green corporate palette
+```
+
+The engine is GUI-free: it publishes `EngineEvent` objects onto a thread-safe
+queue; a background thread drains them into `appstate.run_state`, and the browser
+polls `/api/run-state` (~1.2 s) during a run for live node coloring, console and
+progress. The frontend does its own cycle check as you draw connections; the
+backend re-validates on save/run. The same backend is exercised directly by the
+tests, and has survived three UI rewrites (PySide6 → Streamlit → stdlib web)
+unchanged.
 
 ---
 
@@ -200,54 +235,67 @@ Resume rebuilds the engine from `snapshot_json`, seeds previously-successful
 nodes as SUCCESS and re-runs the rest. "Rerun failed only" reuses the same
 mechanism from the History dashboard.
 
-## 10. GUI framework choice
+## 10. UI approach — stdlib web app + Drawflow
 
-| Framework | Verdict |
+| Approach | Verdict |
 |---|---|
-| **PySide6** ✅ | Official Qt for Python, **LGPL** (free commercial use), `QGraphicsScene` is purpose-built for node editors, mature threading/signals, styling via QSS, first-class PyInstaller support. |
-| PyQt6 | Technically equivalent, but **GPL or paid commercial license** — a real constraint for internal enterprise tools. |
-| Tkinter | No hardware-accelerated canvas scene graph, dated widgets; a serious node editor would be hand-rolled. |
-| CustomTkinter | Nicer skin on the same limitations. |
-| DearPyGui | Immediate-mode; has a node editor but non-native look, smaller ecosystem, harder complex-dialog composition. |
+| **stdlib HTTP server + Drawflow (browser)** ✅ | Zero third-party runtime deps (only Python's `http.server`, `sqlite3`, etc.); real **mouse drag-to-connect** via vendored Drawflow (a small MIT JS file, no CDN, works offline); uses the browser already on the machine; packages to a ~10 MB self-launching `.exe`. |
+| Streamlit (previous) | Pure-Python and quick to build, but **cannot host an interactive drag-canvas** — connecting was form/dropdown based, and the bundle was ~165 MB. |
+| PySide6 / PyQt6 | Native desktop drag-canvas, but heavier and a Qt/licensing surface. |
+| FastAPI + React Flow | Richest canvas, but adds a Node.js build step to every rebuild. |
+
+**Graph editing:** the frontend uses Drawflow — drag DAG nodes on a dotted-grid
+canvas, drag from one node's output port to another's input port to create a
+dependency, click a node to edit it, press Delete to remove it. A JS cycle check
+rejects loop-creating connections as you draw; the backend re-validates on save
+and run.
 
 ## 11. Run from source
 
 ```powershell
 py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python main.py
+pip install -r requirements.txt      # only pyinstaller + pytest (dev tools)
+python run_app.py                    # starts the server and opens the browser
 ```
 
-First run: open **⚙ Settings**, fill in Composer environment / location /
-project. If gcloud has no active credential the app offers to run
-`gcloud auth login` for you.
+First run: click **⚙ Settings** and fill in the environment profiles
+(BLD/INT/PRE/PRD) once. If gcloud has no active credential, the top-bar
+**Sign in / Switch** button runs `gcloud auth login` in your browser.
 
 ## 12. Testing strategy
 
-- **Unit (implemented, `pytest tests/`)**: graph algorithms (cycles, waves,
-  descendants, ready-set, validation) and the CLI wrapper via an injected fake
-  runner (command shape, JSON extraction from noisy output, state mapping,
-  retry policy, trigger non-retry).
-- **Integration (recommended)**: point Settings at a dev Composer env with a
-  trivial `sleep-and-succeed` DAG; verify diamond workflow, failure fail-fast,
-  and kill-the-app resume.
-- **UI smoke**: `pytest-qt` for editor interactions (add node, connect,
-  cycle-rejection dialog).
+- **Unit (`pytest tests/`)**: graph algorithms (cycles, waves, descendants,
+  ready-set, validation) and the CLI wrapper via an injected fake runner
+  (command shape, JSON extraction from noisy output, state mapping, retry
+  policy, trigger non-retry).
+- **Engine (Qt-free)**: drive the engine with a fake gcloud runner and drain
+  its `EngineEvent` queue — verifies diamond parallelism, `--conf` passing,
+  fail-fast downstream-skip, and crash-resume.
+- **UI render**: Streamlit's `AppTest` runs the app headlessly and asserts no
+  exception in the empty state and with a seeded workflow.
+- **Integration (recommended)**: point a profile at a dev Composer env with a
+  trivial `sleep-and-succeed` DAG; verify diamond workflow, fail-fast, resume.
 
 ## 13. Packaging to a single .exe
 
 ```powershell
 pip install pyinstaller
 pyinstaller ComposerFlow.spec
-# → dist\ComposerFlow.exe
+# → dist\ComposerFlow.exe   (double-click: starts Streamlit + opens the browser)
 ```
 
-Notes: `onefile` + `console=False`; unused Qt modules excluded to cut size;
-UPX disabled (antivirus false positives); logs/DB live under
-`%LOCALAPPDATA%\ComposerFlow` so the exe itself stays read-only. For corporate
-distribution, sign the exe (`signtool`) to avoid SmartScreen warnings.
-gcloud is *not* bundled — the target machines already have the Cloud SDK.
+How it works: `run_app.py` is the frozen entry point — it picks a free local
+port, starts the stdlib HTTP server, and opens the browser once the port
+responds. The spec bundles `composer_flow/webapp/static` (HTML/CSS/JS + vendored
+Drawflow) as data files and excludes Streamlit/pandas/Qt entirely, so the
+onefile build is ~10 MB.
+
+Notes: `onefile` + `console=False`; UPX disabled (antivirus false positives);
+logs/DB live under `%LOCALAPPDATA%\ComposerFlow` so the exe itself stays
+read-only. For corporate distribution, sign the exe (`signtool`) to avoid
+SmartScreen warnings. gcloud is *not* bundled — target machines already have
+the Cloud SDK.
 
 ## 14. Future enhancements (design already accommodates them)
 

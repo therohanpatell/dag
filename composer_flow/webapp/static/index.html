@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ComposerFlow</title>
+  <link rel="stylesheet" href="/static/vendor/drawflow.min.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🟢 ComposerFlow</div>
+    <div class="steps" id="steps">
+      <span class="step" data-step="1">1 Design</span><span class="arrow">→</span>
+      <span class="step" data-step="2">2 Configure</span><span class="arrow">→</span>
+      <span class="step" data-step="3">3 Validate</span><span class="arrow">→</span>
+      <span class="step" data-step="4">4 Run</span>
+    </div>
+    <div class="top-actions">
+      <span class="env-label">Environment</span>
+      <select id="envSelect" class="env-select" title="Target Composer environment"></select>
+      <span id="targetChip" class="chip"></span>
+      <span class="divider"></span>
+      <span id="authChip" class="chip chip-muted" title="gcloud sign-in status">gcloud: …</span>
+      <button id="authBtn" class="btn btn-sm">Sign in / Switch</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- left sidebar -->
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-head">Workflows</div>
+        <select id="workflowSelect" class="full"></select>
+        <div class="row gap">
+          <input id="newName" class="full" placeholder="New workflow name" />
+        </div>
+        <div class="row gap">
+          <button id="newBtn" class="btn btn-primary full">Create</button>
+          <button id="deleteBtn" class="btn btn-danger full">Delete</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">Manage</div>
+        <button id="settingsBtn" class="btn full">⚙ Settings</button>
+        <button id="historyBtn" class="btn full">🕘 History</button>
+        <button id="exportBtn" class="btn full">⬆ Export JSON</button>
+        <label class="btn full file-btn">⬇ Import JSON
+          <input id="importFile" type="file" accept="application/json" hidden />
+        </label>
+      </div>
+      <div class="panel hint">
+        <div class="panel-head">How to connect</div>
+        <p>Drag from the <b>●</b> on the right of a DAG to the <b>●</b> on the
+           left of another to make it run after. Drag nodes to arrange. Click a
+           node to edit it; press <b>Delete</b> to remove the selected node.</p>
+      </div>
+    </aside>
+
+    <!-- canvas -->
+    <main class="canvas-wrap">
+      <div class="canvas-toolbar">
+        <div class="wf-title" id="wfTitle">—</div>
+        <div class="spacer"></div>
+        <button id="addNodeBtn" class="btn btn-primary">➕ Add DAG node</button>
+        <button id="autoBtn" class="btn">🧭 Auto-arrange</button>
+        <button id="validateBtn" class="btn">✔ Validate</button>
+        <button id="saveBtn" class="btn">💾 Save</button>
+        <span class="divider"></span>
+        <button id="runBtn" class="btn btn-primary">▶ Run</button>
+        <button id="stopBtn" class="btn btn-danger" disabled>⏹ Stop</button>
+      </div>
+      <div id="drawflow" class="drawflow-host"></div>
+      <div class="run-strip" id="runStrip" hidden>
+        <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+        <span id="progressText" class="muted"></span>
+        <span id="etaText" class="muted"></span>
+      </div>
+    </main>
+
+    <!-- right properties + console -->
+    <aside class="rightbar">
+      <div class="panel" id="propsPanel">
+        <div class="panel-head">⚙ DAG node properties</div>
+        <div id="propsEmpty" class="muted">Select a DAG node to edit it.</div>
+        <div id="propsBody" hidden>
+          <label>DAG ID</label>
+          <input id="pDagId" class="full" placeholder="e.g. daily_sales_load" />
+          <label>Run name (optional)</label>
+          <input id="pRunName" class="full" placeholder="Friendly label" />
+          <label>Parameters (--conf)</label>
+          <table class="params" id="paramsTable"><tbody></tbody></table>
+          <button id="addParamBtn" class="btn btn-sm">+ Add parameter</button>
+          <label>Generated JSON</label>
+          <pre id="pJson" class="json"></pre>
+          <button id="delNodeBtn" class="btn btn-danger full">🗑 Delete node</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">Execution console</div>
+        <div id="console" class="console"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- settings modal -->
+  <div class="modal" id="settingsModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">Settings <button class="modal-x" data-close>✕</button></div>
+      <div class="modal-body" id="settingsBody"></div>
+      <div class="modal-foot">
+        <button id="saveSettingsBtn" class="btn btn-primary">Save settings</button>
+        <button class="btn" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- history modal -->
+  <div class="modal" id="historyModal" hidden>
+    <div class="modal-card wide">
+      <div class="modal-head">Execution history <button class="modal-x" data-close>✕</button></div>
+      <div class="modal-body" id="historyBody"></div>
+      <div class="modal-foot"><button class="btn" data-close>Close</button></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/vendor/drawflow.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,21 +1,24 @@
 # PyInstaller spec — build with:  pyinstaller ComposerFlow.spec
-# Produces dist/ComposerFlow.exe (single file, windowed, no console).
+# Produces dist/ComposerFlow.exe: a single-file Windows app that starts a local
+# web server (Python standard library only) and opens the browser. No Streamlit,
+# no third-party web framework — small and fast.
 from PyInstaller.utils.hooks import collect_submodules
 
+# Bundle the entire static frontend (HTML/CSS/JS + vendored Drawflow).
+datas = [
+    ("composer_flow/webapp/static", "composer_flow/webapp/static"),
+]
+hiddenimports = collect_submodules("composer_flow")
+
 a = Analysis(
-    ["main.py"],
+    ["run_app.py"],
     pathex=["."],
     binaries=[],
-    datas=[],
-    hiddenimports=collect_submodules("composer_flow"),
-    excludes=[
-        # Trim unused Qt modules to shrink the exe
-        "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
-        "PySide6.QtMultimedia", "PySide6.QtQml", "PySide6.QtQuick",
-        "PySide6.Qt3DCore", "PySide6.QtCharts", "PySide6.QtDataVisualization",
-        "PySide6.QtPdf", "PySide6.QtSql", "PySide6.QtTest",
-        "tkinter",
-    ],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    excludes=["tkinter", "PySide6", "PyQt6", "PyQt5", "streamlit", "pandas",
+              "numpy", "altair", "pyarrow", "matplotlib"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -29,8 +32,8 @@ exe = EXE(
     name="ComposerFlow",
     debug=False,
     strip=False,
-    upx=False,           # UPX often triggers AV false positives — keep off
-    console=False,       # windowed app; logs go to %LOCALAPPDATA%/ComposerFlow/logs
+    upx=False,
+    console=False,
     onefile=True,
-    icon=None,           # add "assets/app.ico" here when available
+    icon=None,
 )

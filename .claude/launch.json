@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "composerflow-web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "from composer_flow.webapp.server import run_server; run_server(8530).serve_forever()"],
+      "port": 8530
+    }
+  ]
+}
