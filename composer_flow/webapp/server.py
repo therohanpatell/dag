@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from composer_flow.config import ENVIRONMENT_PROFILES, DEFAULT_SETTINGS
+from composer_flow.config import ENVIRONMENT_PROFILES
 from composer_flow.core import graph as g
 from composer_flow.models.execution import NodeStatus
 from composer_flow.models.workflow import Workflow, new_id
@@ -167,7 +167,6 @@ class Handler(BaseHTTPRequestHandler):
             "auth": _auth_status(),
             "settings": s.all(),
             "workflows": appstate.workflows().list_summaries(),
-            "defaults": DEFAULT_SETTINGS,
         })
 
     def _api_get_workflow(self, workflow_id: str) -> None:

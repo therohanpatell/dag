@@ -33,7 +33,7 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    console=False,
+    console=True,   # shows the server URL; close the window to quit the app
     onefile=True,
     icon=None,
 )

@@ -272,28 +272,60 @@ First run: click **⚙ Settings** and fill in the environment profiles
 - **Engine (Qt-free)**: drive the engine with a fake gcloud runner and drain
   its `EngineEvent` queue — verifies diamond parallelism, `--conf` passing,
   fail-fast downstream-skip, and crash-resume.
-- **UI render**: Streamlit's `AppTest` runs the app headlessly and asserts no
-  exception in the empty state and with a seeded workflow.
+- **Web layer**: the API is plain JSON over the stdlib server — boot it and
+  hit `/api/bootstrap` and `/` to confirm it serves the app and the Drawflow
+  canvas loads.
 - **Integration (recommended)**: point a profile at a dev Composer env with a
   trivial `sleep-and-succeed` DAG; verify diamond workflow, fail-fast, resume.
 
-## 13. Packaging to a single .exe
+## 13. Build the single `.exe`
+
+The repo does **not** contain the built `.exe` (it's git-ignored) — build it
+yourself in a few seconds on Windows.
+
+**Prerequisites:** Python 3.11+ on Windows.
+
+**Steps (PowerShell, from the repo root):**
 
 ```powershell
+# 1. (optional) create and activate a virtual environment
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# 2. install the build tool (PyInstaller). No app runtime deps to install —
+#    the app uses only the Python standard library.
 pip install pyinstaller
+
+# 3. build the single-file exe from the bundled spec
 pyinstaller ComposerFlow.spec
-# → dist\ComposerFlow.exe   (double-click: starts Streamlit + opens the browser)
+
+# 4. result:
+#    dist\ComposerFlow.exe   (~10 MB, one file)
 ```
 
-How it works: `run_app.py` is the frozen entry point — it picks a free local
-port, starts the stdlib HTTP server, and opens the browser once the port
-responds. The spec bundles `composer_flow/webapp/static` (HTML/CSS/JS + vendored
-Drawflow) as data files and excludes Streamlit/pandas/Qt entirely, so the
-onefile build is ~10 MB.
+Run it by double-clicking `dist\ComposerFlow.exe` (or `.\dist\ComposerFlow.exe`
+from a terminal). It starts a local web server on a free port and opens the app
+in your default browser. To quit, close the small console window (or press
+Ctrl+C in it).
 
-Notes: `onefile` + `console=False`; UPX disabled (antivirus false positives);
-logs/DB live under `%LOCALAPPDATA%\ComposerFlow` so the exe itself stays
-read-only. For corporate distribution, sign the exe (`signtool`) to avoid
+**Clean rebuild** (if a previous build misbehaves):
+
+```powershell
+Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+pyinstaller ComposerFlow.spec
+```
+
+**How it works:** `run_app.py` is the frozen entry point — it picks a free
+local port, starts the stdlib HTTP server, and opens the browser once the port
+responds. `ComposerFlow.spec` bundles `composer_flow/webapp/static`
+(HTML/CSS/JS + the vendored Drawflow node editor) as data files and excludes
+Qt/Streamlit/pandas entirely, so the onefile build stays ~10 MB.
+
+**Notes:** `onefile` + `console=True` — a small console window hosts the server
+and shows the URL; closing it quits the app. UPX disabled (avoids antivirus
+false positives); logs and the SQLite database live under
+`%LOCALAPPDATA%\ComposerFlow`, so the exe itself stays read-only and can be
+placed anywhere. For corporate distribution, sign the exe (`signtool`) to avoid
 SmartScreen warnings. gcloud is *not* bundled — target machines already have
 the Cloud SDK.
 

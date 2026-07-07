@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 
 APP_NAME = "ComposerFlow"
-APP_VERSION = "1.0.0"
 
 
 def app_data_dir() -> Path:
