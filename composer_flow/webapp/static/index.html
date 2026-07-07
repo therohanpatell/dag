@@ -10,19 +10,13 @@
 <body>
   <header class="topbar">
     <div class="brand">🟢 ComposerFlow</div>
-    <div class="steps" id="steps">
-      <span class="step" data-step="1">1 Design</span><span class="arrow">→</span>
-      <span class="step" data-step="2">2 Configure</span><span class="arrow">→</span>
-      <span class="step" data-step="3">3 Validate</span><span class="arrow">→</span>
-      <span class="step" data-step="4">4 Run</span>
-    </div>
     <div class="top-actions">
       <span class="env-label">Environment</span>
       <select id="envSelect" class="env-select" title="Target Composer environment"></select>
-      <span id="targetChip" class="chip"></span>
+      <span id="targetChip" class="chip" title=""></span>
       <span class="divider"></span>
       <span id="authChip" class="chip chip-muted" title="gcloud sign-in status">gcloud: …</span>
-      <button id="authBtn" class="btn btn-sm">Sign in / Switch</button>
+      <button id="authBtn" class="btn">Sign in / Switch</button>
     </div>
   </header>
 

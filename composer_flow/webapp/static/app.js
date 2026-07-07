@@ -94,7 +94,7 @@ function renderCanvas() {
   });
   suppressCycle = false;
   $("#wfTitle").textContent = wf.name || "—";
-  showProps(null); updateSteps();
+  showProps(null);
 }
 
 async function openWorkflow(id) {
@@ -114,7 +114,6 @@ function showProps(cfId) {
   $("#pRunName").value = data.run_name || "";
   renderParams(data.params || {});
   updateJson();
-  updateSteps();
 }
 function currentData() { return editor.getNodeFromId(cfToDf[selected]).data; }
 function commitData(patch) {
@@ -153,20 +152,6 @@ function updateJson() {
   $("#pJson").textContent = JSON.stringify(currentData().params || {}, null, 2);
 }
 
-// ---------- steps ribbon ----------
-function updateSteps(step) {
-  if (!step) {
-    if (pollTimer) step = 4;
-    else if (wf && wf.nodes && wf.nodes.length && wf.nodes.every(n => (n.dag_id || "").trim())) step = 3;
-    else if (selected != null) step = 2; else step = 1;
-  }
-  $$("#steps .step").forEach(el => {
-    const s = +el.dataset.step;
-    el.classList.toggle("active", s === step);
-    el.classList.toggle("done", s < step);
-  });
-}
-
 // ---------- top bar: env / auth ----------
 function renderEnv() {
   const sel = $("#envSelect"); sel.innerHTML = "";
@@ -181,11 +166,13 @@ function renderTargetChip(t, profile) {
   chip.className = "chip" + (profile === "PRD" ? " chip-prd" : "");
   chip.textContent = t.complete ? `${t.project} / ${t.location} / ${t.environment}`
     : "not configured — see Settings";
+  chip.title = chip.textContent;  // full text on hover (chip is ellipsized)
 }
 function renderAuth() {
   const chip = $("#authChip"), a = boot.auth || {};
   if (a.authenticated) { chip.className = "chip chip-ok"; chip.textContent = "gcloud: " + a.account; }
   else { chip.className = "chip chip-bad"; chip.textContent = "gcloud: not signed in"; }
+  chip.title = chip.textContent;
 }
 
 // ---------- workflows list ----------
@@ -225,7 +212,6 @@ function applyRunState(st) {
 }
 function startPolling() {
   $("#runStrip").hidden = false; $("#runBtn").disabled = true; $("#stopBtn").disabled = false;
-  updateSteps(4);
   const tick = async () => {
     try { applyRunState(await api("/api/run-state")); } catch (e) {}
   };
@@ -233,7 +219,7 @@ function startPolling() {
 }
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer); pollTimer = null;
-  $("#runBtn").disabled = false; $("#stopBtn").disabled = true; updateSteps();
+  $("#runBtn").disabled = false; $("#stopBtn").disabled = true;
 }
 
 // ---------- actions ----------
@@ -254,7 +240,6 @@ async function validateWorkflow() {
     toast((errs.length ? "❌ " : "⚠ ") + (res.issues[0] ? res.issues[0].message : ""));
     alert(res.issues.map(i => `[${i.level.toUpperCase()}] ${i.message}`).join("\n"));
   }
-  updateSteps();
 }
 async function runWorkflow() {
   await saveWorkflow(true);
@@ -358,7 +343,6 @@ async function boot_load() {
   renderEnv(); renderAuth();
   const id = renderWorkflows();
   if (id) await openWorkflow(id);
-  updateSteps();
 }
 
 function wire() {

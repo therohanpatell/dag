@@ -12,9 +12,15 @@ venv/
 env/
 
 # PyInstaller build output (rebuild locally with: pyinstaller ComposerFlow.spec)
+# NOTE: ComposerFlow.spec IS committed on purpose — it's the build recipe.
 build/
 dist/
 *.manifest
+*.pyz
+*.pkg
+*.toc
+__pyinstaller__/
+*.spec.bak
 
 # Editors / IDEs
 .idea/

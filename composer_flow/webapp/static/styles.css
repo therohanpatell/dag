@@ -13,19 +13,17 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* top bar */
 .topbar { display: flex; align-items: center; gap: 16px; padding: 8px 16px;
-  background: var(--surface); border-bottom: 1px solid var(--border); }
-.brand { font-weight: 700; font-size: 16px; color: #10312e; white-space: nowrap; }
-.steps { display: flex; align-items: center; gap: 6px; }
-.step { padding: 3px 12px; border-radius: 12px; background: #e8eeef; color: var(--muted);
-  font-weight: 600; font-size: 12px; }
-.step.active { background: var(--accent); color: #fff; }
-.step.done { background: var(--accent-soft); color: var(--accent-hover); }
-.arrow { color: #b3c0c4; font-weight: 700; }
-.top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.env-label { color: var(--muted); font-size: 12px; }
+  background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; }
+.brand { font-weight: 700; font-size: 16px; color: #10312e; white-space: nowrap; flex-shrink: 0; }
+.top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.env-label { color: var(--muted); font-size: 12px; flex-shrink: 0; }
 .env-select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
-  font-weight: 700; color: var(--accent-hover); background: var(--surface); }
-.divider { width: 1px; height: 22px; background: var(--border); }
+  font-weight: 700; color: var(--accent-hover); background: var(--surface); flex-shrink: 0; }
+.divider { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
+/* long env/account chips shrink & ellipsize; the button never gets pushed off */
+.top-actions .chip { max-width: 300px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+#authBtn { flex-shrink: 0; white-space: nowrap; }
 
 /* layout */
 .layout { display: flex; flex: 1; min-height: 0; }
