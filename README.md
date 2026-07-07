@@ -296,12 +296,18 @@ py -3.11 -m venv .venv
 #    the app uses only the Python standard library.
 pip install pyinstaller
 
-# 3. build the single-file exe from the bundled spec
-pyinstaller ComposerFlow.spec
+# 3. build the single-file exe from the bundled spec.
+#    Run PyInstaller as a module — this always works, even when a `--user`
+#    pip install didn't put the `pyinstaller` command on PATH.
+python -m PyInstaller ComposerFlow.spec
 
 # 4. result:
 #    dist\ComposerFlow.exe   (~10 MB, one file)
 ```
+
+> If `pyinstaller` gives "not recognized as a command", that just means its
+> Scripts folder isn't on PATH — use `python -m PyInstaller ComposerFlow.spec`
+> as shown above (note the capital `PyInstaller`).
 
 Run it by double-clicking `dist\ComposerFlow.exe` (or `.\dist\ComposerFlow.exe`
 from a terminal). It starts a local web server on a free port and opens the app
@@ -312,7 +318,7 @@ Ctrl+C in it).
 
 ```powershell
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-pyinstaller ComposerFlow.spec
+python -m PyInstaller ComposerFlow.spec
 ```
 
 **How it works:** `run_app.py` is the frozen entry point — it picks a free
