@@ -9,16 +9,16 @@ Why this design (CLI approaches compared):
             dates are assigned server-side and racy under parallel triggers).
 
   Monitor:  Three CLI options exist on Composer 2.2 (Airflow 2.x):
-              1. `dags state <dag_id> <execution_date>` — needs the exact
+              1. `dags state <dag_id> <execution_date>` - needs the exact
                  logical date, which we don't control precisely -> brittle.
-              2. `dags list-runs -- -d <dag_id> -o json` — returns run_id,
+              2. `dags list-runs -- -d <dag_id> -o json` - returns run_id,
                  state, start/end dates as JSON; we filter by our run-id.
                  Deterministic and covers queued/running/success/failed. BEST.
-              3. Polling task states — excessive detail for orchestration.
+              3. Polling task states - excessive detail for orchestration.
             We use (2).
 
 Robustness measures:
-  - subprocess with argument LISTS, shell=False — no shell injection.
+  - subprocess with argument LISTS, shell=False - no shell injection.
   - CREATE_NO_WINDOW so no console windows flash in the windowed .exe.
   - Timeouts on every call; bounded retries with backoff on transient errors.
   - `gcloud composer environments run` proxies the Airflow CLI through
@@ -242,7 +242,7 @@ class GcloudClient:
 
             log.warning("CLI stderr: %s", last.stderr.strip()[:2000])
             if attempt < attempts and self._is_transient(last):
-                log.info("Transient error — retrying in %ss", self.retry_backoff)
+                log.info("Transient error - retrying in %ss", self.retry_backoff)
                 time.sleep(self.retry_backoff)
             else:
                 break
@@ -279,7 +279,7 @@ class GcloudClient:
         return AuthStatus(True, account=account, project=project)
 
     def launch_login(self) -> None:
-        """Start `gcloud auth login` hidden — it opens the browser OAuth flow
+        """Start `gcloud auth login` hidden - it opens the browser OAuth flow
         directly and completes via a local callback server, so no console
         window is needed. Non-blocking; caller re-checks auth afterwards."""
         subprocess.Popen(
@@ -342,7 +342,7 @@ class GcloudClient:
         """Poll `dags list-runs` and map the matching run's state.
 
         Returns (None, result) when the run isn't visible yet (scheduler lag)
-        or output could not be parsed — the engine keeps polling.
+        or output could not be parsed - the engine keeps polling.
         """
         args = self._composer_run_args(
             target,

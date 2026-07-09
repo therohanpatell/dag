@@ -1,11 +1,11 @@
 """SQLite database bootstrap.
 
 Design decisions:
-- Embedded SQLite (stdlib sqlite3) — no external database server. The file
+- Embedded SQLite (stdlib sqlite3) - no external database server. The file
   lives in %LOCALAPPDATA%/ComposerFlow/composerflow.db.
 - WAL journal mode so the UI thread and the execution engine thread can
   read/write concurrently without "database is locked" errors.
-- A new short-lived connection per operation (see Database.connect) — the
+- A new short-lived connection per operation (see Database.connect) - the
   simplest thread-safe pattern for a desktop app; connection setup cost is
   negligible at this scale.
 - Schema versioning via PRAGMA user_version for forward migrations.
@@ -21,15 +21,16 @@ from composer_flow.utils.logger import get_logger
 
 log = get_logger("db")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS workflows (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    description        TEXT NOT NULL DEFAULT '',
+    shared_params_json TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
@@ -109,8 +110,15 @@ class Database:
         with self.connect() as conn:
             conn.executescript(_SCHEMA)
             version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < 2:
+                # v1 -> v2: add workflow-level shared parameters column.
+                cols = [r["name"] for r in conn.execute("PRAGMA table_info(workflows)")]
+                if "shared_params_json" not in cols:
+                    conn.execute(
+                        "ALTER TABLE workflows ADD COLUMN "
+                        "shared_params_json TEXT NOT NULL DEFAULT '{}'"
+                    )
             if version < SCHEMA_VERSION:
-                # Future migrations: if version == 1: ... etc.
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         log.info("Database ready at %s (schema v%s)", self.path, SCHEMA_VERSION)
 

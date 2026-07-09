@@ -1,6 +1,6 @@
 """Standard-library HTTP server for the ComposerFlow web app.
 
-No third-party web framework — ThreadingHTTPServer + BaseHTTPRequestHandler.
+No third-party web framework - ThreadingHTTPServer + BaseHTTPRequestHandler.
 Serves the static frontend and a small JSON API backed by the shared
 composer_flow backend. The browser polls /api/run-state during execution for
 live status (no websockets needed).

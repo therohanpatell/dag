@@ -1,7 +1,7 @@
 """Dependency-graph algorithms: validation, cycle detection, topological
 levels, descendants and ready-set computation.
 
-Pure functions over the Workflow model — fully unit-testable without Qt/DB.
+Pure functions over the Workflow model - fully unit-testable without Qt/DB.
 
 Parallelism falls out of the graph structure automatically: at any moment the
 "ready set" is every PENDING node whose predecessors have all SUCCEEDED, so
@@ -209,7 +209,7 @@ def validate(workflow: Workflow) -> list[ValidationIssue]:
             issues.append(
                 ValidationIssue(
                     "warning",
-                    f"DAG '{dag_id}' appears {count} times — runs get distinct run-ids, "
+                    f"DAG '{dag_id}' appears {count} times - runs get distinct run-ids, "
                     "but verify this is intentional.",
                 )
             )

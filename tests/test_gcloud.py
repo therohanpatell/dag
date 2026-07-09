@@ -1,5 +1,5 @@
 """Unit tests for the gcloud CLI wrapper (parsing, run-ids, command shape,
-retry behavior) using an injected fake runner — no real gcloud needed."""
+retry behavior) using an injected fake runner - no real gcloud needed."""
 import json
 import subprocess
 

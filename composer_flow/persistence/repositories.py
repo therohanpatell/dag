@@ -1,4 +1,4 @@
-"""Repository layer — the only place that speaks SQL.
+"""Repository layer - the only place that speaks SQL.
 
 WorkflowRepository  : workflows + nodes + edges + versions + import/export
 ExecutionRepository : execution history, node executions, resume state, stats
@@ -46,6 +46,10 @@ class WorkflowRepository:
                 id=row["id"],
                 name=row["name"],
                 description=row["description"],
+                shared_params=json.loads(
+                    (row["shared_params_json"] if "shared_params_json" in row.keys()
+                     else "{}") or "{}"
+                ),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -75,13 +79,17 @@ class WorkflowRepository:
         wf.updated_at = utc_now_iso()
         with self._db.connect() as conn:
             conn.execute(
-                """INSERT INTO workflows (id, name, description, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO workflows
+                       (id, name, description, shared_params_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                        name = excluded.name,
                        description = excluded.description,
+                       shared_params_json = excluded.shared_params_json,
                        updated_at = excluded.updated_at""",
-                (wf.id, wf.name, wf.description, wf.created_at, wf.updated_at),
+                (wf.id, wf.name, wf.description,
+                 json.dumps(wf.shared_params, ensure_ascii=False),
+                 wf.created_at, wf.updated_at),
             )
             conn.execute("DELETE FROM nodes WHERE workflow_id = ?", (wf.id,))
             conn.execute("DELETE FROM edges WHERE workflow_id = ?", (wf.id,))
@@ -193,7 +201,7 @@ class ExecutionRepository:
     # -- resume / history ----------------------------------------------------
 
     def find_interrupted(self) -> list[dict]:
-        """Executions still marked 'running' — i.e. the app died mid-run."""
+        """Executions still marked 'running' - i.e. the app died mid-run."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM executions WHERE status = ? ORDER BY started_at DESC",
@@ -246,7 +254,7 @@ class ExecutionRepository:
         return [dict(r) for r in rows]
 
     def average_dag_duration(self, dag_id: str) -> float | None:
-        """Mean duration of past successful runs — used for ETA estimates."""
+        """Mean duration of past successful runs - used for ETA estimates."""
         with self._db.connect() as conn:
             row = conn.execute(
                 """SELECT AVG(duration_seconds) FROM node_executions

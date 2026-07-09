@@ -14,7 +14,7 @@ class NodeStatus(str, Enum):
     RUNNING = "running"        # Airflow reports running
     SUCCESS = "success"
     FAILED = "failed"
-    SKIPPED = "skipped"        # upstream failed — never triggered
+    SKIPPED = "skipped"        # upstream failed - never triggered
     CANCELLED = "cancelled"    # user cancelled before trigger
 
     @property
@@ -67,7 +67,7 @@ class WorkflowExecution:
     workflow_id: str = ""
     workflow_name: str = ""
     status: str = WorkflowStatus.RUNNING.value
-    snapshot_json: str = ""  # full Workflow JSON at run time — resume-safe
+    snapshot_json: str = ""  # full Workflow JSON at run time - resume-safe
     error: str = ""
     started_at: str = field(default_factory=utc_now_iso)
     finished_at: str = ""

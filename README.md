@@ -4,7 +4,7 @@ A production-grade tool for visually designing and orchestrating **existing
 Apache Airflow DAGs in Google Cloud Composer 2.2**, using **only the Google
 Cloud CLI** (no Airflow UI, no Airflow REST API).
 
-The UI is a **local web app built on the Python standard library only** — no
+The UI is a **local web app built on the Python standard library only** - no
 Streamlit, no web framework, no Node.js. It ships as a single Windows **`.exe`**:
 double-click it and it starts a tiny local HTTP server and opens your browser
 automatically. The canvas supports **mouse drag-to-connect** (drag from one DAG's
@@ -17,7 +17,7 @@ existing Composer DAGs triggered via `gcloud composer environments run`.
 ## Architecture at a glance
 
 ```
-run_app.py (.exe entry) ──starts──▶ stdlib HTTP server ──opens──▶ browser
+run_app.py (.exe entry) ──starts──> stdlib HTTP server ──opens──> browser
         │                          (composer_flow/webapp/server.py)
         │                                   │ serves
         │                                   ▼
@@ -28,7 +28,7 @@ run_app.py (.exe entry) ──starts──▶ stdlib HTTP server ──opens─�
               ├── core/graph.py       validation, cycles, topological waves, ready-set
               ├── services/
               │     ├── gcloud.py     gcloud CLI wrapper (trigger / poll / auth / retries)
-              │     ├── engine.py     execution engine (threads) — emits EngineEvent
+              │     ├── engine.py     execution engine (threads) - emits EngineEvent
               │     └── events.py     thread-safe event queue (no GUI toolkit)
               ├── persistence/        SQLite (WAL) + Repository pattern
               ├── webapp/             HTTP server + appstate + static frontend
@@ -52,8 +52,8 @@ unchanged.
 | F1 | Create, edit, delete, save multiple workflows (all managed in the GUI) |
 | F2 | Drag-and-drop graph editor: add DAG nodes, connect them with arrows, define dependencies visually |
 | F3 | Per-node configuration: DAG ID, optional run name, unlimited JSON key/value parameters converted to a `--conf` JSON payload |
-| F4 | Execution order derived automatically from the dependency graph (sequential chains and parallel branches — diamond patterns supported) |
-| F5 | Trigger DAGs through `gcloud composer environments run … dags trigger` with a client-generated `--run-id` |
+| F4 | Execution order derived automatically from the dependency graph (sequential chains and parallel branches - diamond patterns supported) |
+| F5 | Trigger DAGs through `gcloud composer environments run ... dags trigger` with a client-generated `--run-id` |
 | F6 | Monitor run states (queued / running / success / failed) by polling `dags list-runs` |
 | F7 | Fail fast: on any DAG failure, stop launching, mark all downstream DAGs skipped and pending ones cancelled; show failed node in red with the exact CLI command, stdout, stderr and duration |
 | F8 | Crash-safe resume: every state transition is persisted; on restart the app offers **Resume / Restart / Discard** for interrupted executions |
@@ -68,10 +68,10 @@ unchanged.
 ## 2. Non-functional requirements
 
 - **No external services**: storage is an embedded **SQLite** file
-  (`%LOCALAPPDATA%\ComposerFlow\composerflow.db`) — no SQL server, no config
+  (`%LOCALAPPDATA%\ComposerFlow\composerflow.db`) - no SQL server, no config
   files to hand-edit.
 - **Security**: `subprocess` is always invoked with argument *lists* and
-  `shell=False` (no shell injection); no credentials are stored — auth is
+  `shell=False` (no shell injection); no credentials are stored - auth is
   delegated entirely to gcloud's own credential store.
 - **Responsiveness**: all gcloud calls run off the UI thread (engine thread +
   bounded worker pool); UI updates via queued Qt signals only.
@@ -97,7 +97,7 @@ or subprocess; services never touch widgets):
         Qt signals (queued)             direct calls
 ┌──────────────┴───────────────┐  ┌───────────┴──────────────────────────────┐
 │  Service layer               │  │  Core (pure functions)                   │
-│  WorkflowEngine (scheduler)  │─▶│  graph.py: validate, cycles, topo levels,│
+│  WorkflowEngine (scheduler)  │─>│  graph.py: validate, cycles, topo levels,│
 │  GcloudClient (CLI wrapper)  │  │  descendants, ready-set                  │
 └──────────────▲───────────────┘  └───────────▲──────────────────────────────┘
                │                              │
@@ -168,19 +168,19 @@ settings(key PK, value)
 ## 6. Class diagram (core relationships)
 
 ```
-MainWindow ──owns──▶ GraphEditor, Panels, Dialogs
-MainWindow ──creates per run──▶ WorkflowEngine
-WorkflowEngine ──uses──▶ GcloudClient, ExecutionRepository, core.graph
-WorkflowEngine ──emits──▶ node_status_changed / log_message / progress /
+MainWindow ──owns──> GraphEditor, Panels, Dialogs
+MainWindow ──creates per run──> WorkflowEngine
+WorkflowEngine ──uses──> GcloudClient, ExecutionRepository, core.graph
+WorkflowEngine ──emits──> node_status_changed / log_message / progress /
                           eta_changed / execution_finished  (Qt signals)
-GcloudClient ──runs──▶ subprocess (gcloud.cmd), injectable runner for tests
-Repositories ──use──▶ Database (context-managed connections)
+GcloudClient ──runs──> subprocess (gcloud.cmd), injectable runner for tests
+Repositories ──use──> Database (context-managed connections)
 Workflow 1─* DagNode ; Workflow 1─* Edge ; WorkflowExecution 1─* NodeExecution
 ```
 
 ## 7. Algorithms
 
-**Graph dependency / parallel execution** — event-driven Kahn scheduler
+**Graph dependency / parallel execution** - event-driven Kahn scheduler
 (`core/graph.py` + `services/engine.py`):
 
 ```
@@ -199,7 +199,7 @@ For the diamond `A → (B,C) → D`: after A succeeds, B and C are both in the
 ready set and trigger concurrently; D only becomes ready when *both* report
 SUCCESS. No explicit "parallel branches" configuration is ever needed.
 
-**Cycle detection** — iterative 3-color DFS returning the actual cycle path for
+**Cycle detection** - iterative 3-color DFS returning the actual cycle path for
 the error message; `would_create_cycle()` (BFS reachability) blocks invalid
 edges at draw time.
 
@@ -208,16 +208,16 @@ edges at draw time.
 | Task | Options | Chosen & why |
 |---|---|---|
 | Trigger | `dags trigger` with/without `--run-id` | **With generated `--run-id`** (`cf__<name>__<utc>__<uuid8>`): the only way to deterministically correlate the run afterwards, especially with parallel triggers of the same DAG. |
-| Monitor | (a) `dags state <dag> <execution_date>` (b) `dags list-runs -- -d <dag> -o json` (c) task-level polling | **(b)**: (a) needs the exact server-assigned logical date — racy; (c) is overkill. (b) returns `run_id` + `state` as JSON we filter client-side. |
+| Monitor | (a) `dags state <dag> <execution_date>` (b) `dags list-runs -- -d <dag> -o json` (c) task-level polling | **(b)**: (a) needs the exact server-assigned logical date - racy; (c) is overkill. (b) returns `run_id` + `state` as JSON we filter client-side. |
 | Auth | `gcloud auth list --filter=status:ACTIVE --format=json` + `gcloud auth login` launcher | Non-interactive check + interactive login in a visible console (browser flow). |
 
 Robustness specifics:
 - `gcloud composer environments run` proxies Airflow's CLI through kubectl and
-  interleaves noise into stderr — `extract_json()` does string-aware bracket
+  interleaves noise into stderr - `extract_json()` does string-aware bracket
   balancing over combined stdout+stderr to recover the JSON payload.
 - **Trigger reconciliation**: a trigger that times out client-side may still
   have created the run server-side. On trigger failure the engine checks
-  whether its run-id exists before declaring failure — this is also why the
+  whether its run-id exists before declaring failure - this is also why the
   trigger command is *never* blind-retried (idempotency), while read-only
   polls retry freely on transient errors.
 - Every call: `shell=False`, arg lists, timeout, `CREATE_NO_WINDOW`.
@@ -235,16 +235,16 @@ Resume rebuilds the engine from `snapshot_json`, seeds previously-successful
 nodes as SUCCESS and re-runs the rest. "Rerun failed only" reuses the same
 mechanism from the History dashboard.
 
-## 10. UI approach — stdlib web app + Drawflow
+## 10. UI approach - stdlib web app + Drawflow
 
 | Approach | Verdict |
 |---|---|
 | **stdlib HTTP server + Drawflow (browser)** ✅ | Zero third-party runtime deps (only Python's `http.server`, `sqlite3`, etc.); real **mouse drag-to-connect** via vendored Drawflow (a small MIT JS file, no CDN, works offline); uses the browser already on the machine; packages to a ~10 MB self-launching `.exe`. |
-| Streamlit (previous) | Pure-Python and quick to build, but **cannot host an interactive drag-canvas** — connecting was form/dropdown based, and the bundle was ~165 MB. |
+| Streamlit (previous) | Pure-Python and quick to build, but **cannot host an interactive drag-canvas** - connecting was form/dropdown based, and the bundle was ~165 MB. |
 | PySide6 / PyQt6 | Native desktop drag-canvas, but heavier and a Qt/licensing surface. |
 | FastAPI + React Flow | Richest canvas, but adds a Node.js build step to every rebuild. |
 
-**Graph editing:** the frontend uses Drawflow — drag DAG nodes on a dotted-grid
+**Graph editing:** the frontend uses Drawflow - drag DAG nodes on a dotted-grid
 canvas, drag from one node's output port to another's input port to create a
 dependency, click a node to edit it, press Delete to remove it. A JS cycle check
 rejects loop-creating connections as you draw; the backend re-validates on save
@@ -259,7 +259,7 @@ pip install -r requirements.txt      # only pyinstaller + pytest (dev tools)
 python run_app.py                    # starts the server and opens the browser
 ```
 
-First run: click **⚙ Settings** and fill in the environment profiles
+First run: click the **Settings** tab and fill in the environment profiles
 (BLD/INT/PRE/PRD) once. If gcloud has no active credential, the top-bar
 **Sign in / Switch** button runs `gcloud auth login` in your browser.
 
@@ -270,9 +270,9 @@ First run: click **⚙ Settings** and fill in the environment profiles
   (command shape, JSON extraction from noisy output, state mapping, retry
   policy, trigger non-retry).
 - **Engine (Qt-free)**: drive the engine with a fake gcloud runner and drain
-  its `EngineEvent` queue — verifies diamond parallelism, `--conf` passing,
+  its `EngineEvent` queue - verifies diamond parallelism, `--conf` passing,
   fail-fast downstream-skip, and crash-resume.
-- **Web layer**: the API is plain JSON over the stdlib server — boot it and
+- **Web layer**: the API is plain JSON over the stdlib server - boot it and
   hit `/api/bootstrap` and `/` to confirm it serves the app and the Drawflow
   canvas loads.
 - **Integration (recommended)**: point a profile at a dev Composer env with a
@@ -280,7 +280,7 @@ First run: click **⚙ Settings** and fill in the environment profiles
 
 ## 13. Build the single `.exe`
 
-The repo does **not** contain the built `.exe` (it's git-ignored) — build it
+The repo does **not** contain the built `.exe` (it's git-ignored) - build it
 yourself in a few seconds on Windows.
 
 **Prerequisites:** Python 3.11+ on Windows.
@@ -292,12 +292,12 @@ yourself in a few seconds on Windows.
 py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# 2. install the build tool (PyInstaller). No app runtime deps to install —
+# 2. install the build tool (PyInstaller). No app runtime deps to install -
 #    the app uses only the Python standard library.
 pip install pyinstaller
 
 # 3. build the single-file exe from the bundled spec.
-#    Run PyInstaller as a module — this always works, even when a `--user`
+#    Run PyInstaller as a module - this always works, even when a `--user`
 #    pip install didn't put the `pyinstaller` command on PATH.
 python -m PyInstaller ComposerFlow.spec
 
@@ -306,7 +306,7 @@ python -m PyInstaller ComposerFlow.spec
 ```
 
 > If `pyinstaller` gives "not recognized as a command", that just means its
-> Scripts folder isn't on PATH — use `python -m PyInstaller ComposerFlow.spec`
+> Scripts folder isn't on PATH - use `python -m PyInstaller ComposerFlow.spec`
 > as shown above (note the capital `PyInstaller`).
 
 Run it by double-clicking `dist\ComposerFlow.exe` (or `.\dist\ComposerFlow.exe`
@@ -321,18 +321,18 @@ Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 python -m PyInstaller ComposerFlow.spec
 ```
 
-**How it works:** `run_app.py` is the frozen entry point — it picks a free
+**How it works:** `run_app.py` is the frozen entry point - it picks a free
 local port, starts the stdlib HTTP server, and opens the browser once the port
 responds. `ComposerFlow.spec` bundles `composer_flow/webapp/static`
 (HTML/CSS/JS + the vendored Drawflow node editor) as data files and excludes
 Qt/Streamlit/pandas entirely, so the onefile build stays ~10 MB.
 
-**Notes:** `onefile` + `console=True` — a small console window hosts the server
+**Notes:** `onefile` + `console=True` - a small console window hosts the server
 and shows the URL; closing it quits the app. UPX disabled (avoids antivirus
 false positives); logs and the SQLite database live under
 `%LOCALAPPDATA%\ComposerFlow`, so the exe itself stays read-only and can be
 placed anywhere. For corporate distribution, sign the exe (`signtool`) to avoid
-SmartScreen warnings. gcloud is *not* bundled — target machines already have
+SmartScreen warnings. gcloud is *not* bundled - target machines already have
 the Cloud SDK.
 
 ## 14. Future enhancements (design already accommodates them)
@@ -342,7 +342,7 @@ the Cloud SDK.
 - DAG-ID autocomplete via `dags list` (add a method to `GcloudClient`).
 - Per-node retry policies, timeouts and trigger rules (e.g. "run on failure").
 - Scheduled workflow runs (Windows Task Scheduler + CLI mode entry point).
-- Multi-environment profiles (dev/uat/prd) — extra columns in `settings`.
+- Multi-environment profiles (dev/uat/prd) - extra columns in `settings`.
 - Notifications (toast/email/Teams webhook) on completion or failure.
 - Gantt-style visual timeline; run-comparison view.
 
@@ -355,7 +355,7 @@ the Cloud SDK.
   workflows between environments (values like `environment: PRD` are visible
   in the confirm dialog on purpose).
 - Set the poll interval ≥ 15 s in production: each poll spawns a kubectl exec
-  in the Composer GKE cluster — polite polling avoids pressure on the
+  in the Composer GKE cluster - polite polling avoids pressure on the
   environment.
-- Watch the first `list-runs` after trigger: scheduler lag of 10–60 s before
+- Watch the first `list-runs` after trigger: scheduler lag of 10-60 s before
   the run becomes visible is normal; the engine tolerates it by design.

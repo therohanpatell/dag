@@ -1,4 +1,4 @@
-"""Application state for the web app — no Streamlit, no GUI toolkit.
+"""Application state for the web app - no Streamlit, no GUI toolkit.
 
 Owns the singleton Database, repositories, gcloud client factory, the active
 environment target, and the single running execution (this is a local,

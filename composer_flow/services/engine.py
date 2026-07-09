@@ -18,7 +18,7 @@ Algorithm (event-driven Kahn scheduler):
 
 Threading model: the engine runs in one background thread; blocking gcloud
 calls run in a worker pool sized by max_parallel_dags. UI communication is a
-thread-safe event queue (see services/events.py) — the engine never touches
+thread-safe event queue (see services/events.py) - the engine never touches
 any GUI toolkit, so the same engine drives both the Streamlit and Qt front-ends.
 """
 from __future__ import annotations
@@ -108,7 +108,7 @@ class WorkflowEngine:
 
     def cancel(self) -> None:
         self._stop.set()
-        self._log("warning", "Cancellation requested — pending DAGs will not be triggered.")
+        self._log("warning", "Cancellation requested - pending DAGs will not be triggered.")
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -214,7 +214,7 @@ class WorkflowEngine:
                     self._statuses[node.id] = NodeStatus.PENDING
                 self._records[node.id] = rec
                 self.exec_repo.update_node(rec)
-            self._log("info", f"Resuming execution — {len(self._completed)} DAG(s) already succeeded.")
+            self._log("info", f"Resuming execution - {len(self._completed)} DAG(s) already succeeded.")
         else:
             execution = WorkflowExecution(
                 workflow_id=wf.id, workflow_name=wf.name,
@@ -249,7 +249,7 @@ class WorkflowEngine:
         levels = g.topological_levels(wf)
         self._log(
             "info",
-            f"Execution plan: {len(levels)} wave(s) — "
+            f"Execution plan: {len(levels)} wave(s) - "
             + " | ".join(
                 ", ".join(wf.node_by_id(n).display_name() for n in lvl) for lvl in levels
             ),
@@ -331,7 +331,7 @@ class WorkflowEngine:
             status.value, "info"
         )
         self._log(level, f"Workflow finished: {status.value.upper()}"
-                          + (f" — {error}" if error else ""))
+                          + (f" - {error}" if error else ""))
         self._emit(EngineEvent(FINISHED, status=status.value, error=error))
 
     def _cancel_pending(self) -> None:
@@ -358,11 +358,17 @@ class WorkflowEngine:
         try:
             run_id = generate_run_id(node.run_name or node.dag_id)
             rec.airflow_run_id = run_id
+            conf_json = self.workflow.conf_for(node)  # shared params merged in
+            shared = self.workflow.shared_params
+            extra = f" (incl. {len(shared)} shared param(s))" if shared else ""
             self._log("info", f"Triggering DAG '{node.dag_id}' (run-id {run_id})")
+            self._log("info", f"  conf{extra}: {conf_json}")
             result = self.gcloud.trigger_dag(
-                self.config.target, node.dag_id, node.conf_json(), run_id,
+                self.config.target, node.dag_id, conf_json, run_id,
                 timeout=self.config.trigger_timeout,
             )
+            # Show the exact CLI command (with parameters) that was run.
+            self._log("info", f"  $ {result.command_str}")
             with self._lock:
                 rec.command = result.command_str
                 rec.stdout = result.stdout[-20000:]
@@ -371,10 +377,10 @@ class WorkflowEngine:
 
             if result.ok:
                 self._set_status(node_id, NodeStatus.QUEUED)
-                self._log("info", f"'{node.dag_id}' accepted by Airflow — monitoring run state.")
+                self._log("info", f"'{node.dag_id}' accepted by Airflow - monitoring run state.")
                 return
 
-            # A trigger timeout may still have started the run server-side —
+            # A trigger timeout may still have started the run server-side -
             # reconcile by checking whether our run-id exists before failing.
             self._log(
                 "warning",
@@ -386,7 +392,7 @@ class WorkflowEngine:
             )
             if state is not None:
                 self._set_status(node_id, NodeStatus.QUEUED)
-                self._log("info", f"'{node.dag_id}' run exists despite CLI error — monitoring.")
+                self._log("info", f"'{node.dag_id}' run exists despite CLI error - monitoring.")
                 return
 
             with self._lock:
@@ -415,7 +421,7 @@ class WorkflowEngine:
                         f"Status poll for '{node.dag_id}' failed (rc={result.returncode}); "
                         "will retry.",
                     )
-                return  # not visible yet / transient — keep polling
+                return  # not visible yet / transient - keep polling
             current = self._statuses.get(node_id)
             if state == current or current is None or current.is_terminal:
                 return

@@ -1,6 +1,6 @@
 """Domain models for workflows: nodes, edges and the workflow aggregate.
 
-Plain dataclasses — no Qt or DB dependencies — so the core and services layers
+Plain dataclasses - no Qt or DB dependencies - so the core and services layers
 stay framework-agnostic (Dependency Inversion).
 """
 from __future__ import annotations
@@ -86,11 +86,23 @@ class Workflow:
     description: str = ""
     nodes: list[DagNode] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
+    # Parameters applied to EVERY DAG in this workflow (a per-DAG key of the
+    # same name wins). Empty by default - only enforced when you fill it in.
+    shared_params: dict[str, str] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
     def node_by_id(self, node_id: str) -> DagNode | None:
         return next((n for n in self.nodes if n.id == node_id), None)
+
+    def effective_params(self, node: DagNode) -> dict[str, str]:
+        """Shared params merged with the node's own (node wins on conflict)."""
+        return {**self.shared_params, **node.params}
+
+    def conf_for(self, node: DagNode) -> str:
+        """Compact `--conf` JSON for a node, including shared params."""
+        return json.dumps(self.effective_params(node),
+                          separators=(",", ":"), ensure_ascii=False)
 
     def to_dict(self) -> dict:
         return {
@@ -99,6 +111,7 @@ class Workflow:
             "description": self.description,
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
+            "shared_params": dict(self.shared_params),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -112,6 +125,8 @@ class Workflow:
             id=str(d.get("id") or new_id()),
             name=str(d.get("name", "Imported Workflow")),
             description=str(d.get("description", "")),
+            shared_params={str(k): str(v)
+                           for k, v in dict(d.get("shared_params") or {}).items()},
             created_at=str(d.get("created_at") or utc_now_iso()),
             updated_at=str(d.get("updated_at") or utc_now_iso()),
         )

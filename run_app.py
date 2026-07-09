@@ -1,4 +1,4 @@
-"""EXE entry point — starts the local web server and opens the browser.
+"""EXE entry point - starts the local web server and opens the browser.
 
 Double-click ComposerFlow.exe → a tiny standard-library HTTP server starts on
 a free local port and the default browser opens to the app. No console, no

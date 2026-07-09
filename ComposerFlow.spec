@@ -1,7 +1,7 @@
-# PyInstaller spec — build with:  pyinstaller ComposerFlow.spec
+# PyInstaller spec - build with:  pyinstaller ComposerFlow.spec
 # Produces dist/ComposerFlow.exe: a single-file Windows app that starts a local
 # web server (Python standard library only) and opens the browser. No Streamlit,
-# no third-party web framework — small and fast.
+# no third-party web framework - small and fast.
 from PyInstaller.utils.hooks import collect_submodules
 
 # Bundle the entire static frontend (HTML/CSS/JS + vendored Drawflow).

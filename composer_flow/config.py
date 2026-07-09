@@ -1,7 +1,7 @@
 """Application configuration: paths, constants and defaults.
 
 Everything user-configurable lives in the SQLite settings table and is edited
-through the GUI (Settings dialog) — no manual config files are required.
+through the GUI (Settings dialog) - no manual config files are required.
 """
 from __future__ import annotations
 
