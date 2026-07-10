@@ -5,11 +5,17 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 let editor, boot = null, wf = null, selected = null;
 let cfToDf = {}, dfToCf = {}, pollTimer = null, suppressCycle = false;
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
+  // Every request gets a timeout so a hung call can never freeze the UI.
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), opts.timeoutMs || 20000);
+  try {
+    const res = await fetch(path, { ...opts, signal: ctrl.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    return data;
+  } finally { clearTimeout(to); }
 }
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
@@ -31,17 +37,94 @@ function setDirty(v) {
   if (v) {
     if (b) { b.hidden = false; b.textContent = "unsaved"; }
     scheduleAutosave();
+    recordSoon();               // capture an undo point for this change
   } else if (b) { b.hidden = true; }
 }
 function scheduleAutosave() {
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(doAutosave, 700);
 }
+let saving = false;
 async function doAutosave() {
-  if (!wf || pollTimer) return;   // nothing open, or a run is in progress
+  if (!wf || pollTimer) return;        // nothing open, or a run is in progress
+  if (saving) { scheduleAutosave(); return; }   // one save at a time; retry after
+  saving = true;
   const b = $("#dirtyBadge"); if (b) b.textContent = "saving...";
-  try { await saveWorkflow(true); }
-  catch (e) { if (b) { b.hidden = false; b.textContent = "save failed"; } }
+  try {
+    await saveWorkflow(true);          // clears the badge on success
+  } catch (e) {
+    if (b) { b.hidden = false; b.textContent = "unsaved"; }
+    scheduleAutosave();                // transient failure/timeout: retry, never stuck
+  } finally {
+    saving = false;                    // ALWAYS reset - no permanent "saving..."
+  }
+}
+
+// ---------- undo / redo (Ctrl+Z / Ctrl+Y) ----------
+let undoStack = [], redoStack = [], histTimer = null, restoring = false;
+function wfSnapshot() {
+  return JSON.stringify({ nodes: wf.nodes, edges: wf.edges, shared_params: wf.shared_params || {} });
+}
+function resetHistoryBaseline() {
+  if (!wf) { undoStack = []; redoStack = []; return; }
+  collectWorkflow();
+  undoStack = [wfSnapshot()]; redoStack = [];
+}
+function recordSoon() {
+  if (restoring || !wf) return;
+  clearTimeout(histTimer);
+  histTimer = setTimeout(recordNow, 350);   // coalesce rapid edits into one step
+}
+function recordNow() {
+  if (restoring || !wf) return;
+  clearTimeout(histTimer);
+  collectWorkflow();
+  const snap = wfSnapshot();
+  if (undoStack[undoStack.length - 1] !== snap) {
+    undoStack.push(snap);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack = [];
+  }
+}
+function restoreState(snap) {
+  const o = JSON.parse(snap);
+  wf.nodes = o.nodes; wf.edges = o.edges; wf.shared_params = o.shared_params || {};
+  restoring = true;
+  renderCanvas(false);   // rebuild canvas without resetting history
+  restoring = false;
+  setDirty(true);        // persist the change (won't re-record: equals stack top)
+}
+function undo() {
+  if (!wf || pollTimer) return;
+  recordNow();                        // flush any pending edit first
+  if (undoStack.length <= 1) { toast("Nothing to undo"); return; }
+  redoStack.push(undoStack.pop());
+  restoreState(undoStack[undoStack.length - 1]);
+  toast("Undo");
+}
+function redo() {
+  if (!wf || pollTimer || !redoStack.length) { if (!redoStack.length) toast("Nothing to redo"); return; }
+  const snap = redoStack.pop();
+  undoStack.push(snap);
+  restoreState(snap);
+  toast("Redo");
+}
+
+// ---------- collapsible side panels ----------
+function togglePanel(sel, btn) {
+  const el = $(sel); if (!el) return;
+  el.hidden = !el.hidden;
+  if (btn) btn.classList.toggle("active", !el.hidden);
+  try { localStorage.setItem("cf_panel_" + sel, el.hidden ? "1" : "0"); } catch (e) {}
+}
+function restorePanelState() {
+  [[".sidebar", "#toggleLeft"], [".rightbar", "#toggleRight"]].forEach(([sel, bsel]) => {
+    let hidden = false;
+    try { hidden = localStorage.getItem("cf_panel_" + sel) === "1"; } catch (e) {}
+    const el = $(sel), btn = $(bsel);
+    if (el) el.hidden = hidden;
+    if (btn) btn.classList.toggle("active", !hidden);
+  });
 }
 
 // ---------- Drawflow canvas ----------
@@ -117,7 +200,8 @@ function hasCycle(nodes, edges) {
 }
 
 // ---------- workflow load / render ----------
-function renderCanvas() {
+function renderCanvas(resetHistory = true) {
+  if (typeof multiSel !== "undefined") multiSel.clear();
   editor.clear(); cfToDf = {}; dfToCf = {};
   suppressCycle = true;
   (wf.nodes || []).forEach(addNodeToCanvas);
@@ -130,6 +214,34 @@ function renderCanvas() {
   showProps(null);
   renderShared();
   setDirty(false);
+  if (resetHistory) resetHistoryBaseline();
+  fetchEstimate();
+}
+
+// ---------- estimated total run time (from past runs) ----------
+function fmtDur(s) {
+  s = Math.round(s);
+  const m = Math.floor(s / 60);
+  return m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+let estTimer = null;
+function scheduleEstimate() { clearTimeout(estTimer); estTimer = setTimeout(fetchEstimate, 500); }
+async function fetchEstimate() {
+  const el = $("#estLabel"); if (!el) return;
+  if (!wf || !wf.nodes.length) { el.textContent = ""; el.title = ""; return; }
+  collectWorkflow();
+  try {
+    const r = await api("/api/estimate", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(wf) });
+    if (!r.has_estimate) {
+      el.textContent = "no time history yet";
+      el.title = "Run this workflow once - future estimates use past run durations.";
+      return;
+    }
+    el.textContent = "~" + fmtDur(r.seconds) + " est.";
+    el.title = "Estimated total run time from previous runs (parallel DAGs overlap)"
+      + (r.unknown ? ` - plus ${r.unknown} DAG(s) with no history yet` : "");
+  } catch (e) { el.textContent = ""; }
 }
 
 async function openWorkflow(id) {
@@ -244,7 +356,8 @@ function renderTargetChip(t, profile) {
 }
 function renderAuth() {
   const chip = $("#authChip"), a = boot.auth || {};
-  if (a.authenticated) { chip.className = "chip chip-ok"; chip.textContent = "gcloud: " + a.account; }
+  if (!a.checked) { chip.className = "chip chip-muted"; chip.textContent = "gcloud: checking..."; }
+  else if (a.authenticated) { chip.className = "chip chip-ok"; chip.textContent = "gcloud: " + a.account; }
   else { chip.className = "chip chip-bad"; chip.textContent = "gcloud: not signed in"; }
   chip.title = chip.textContent;
 }
@@ -303,6 +416,7 @@ async function saveWorkflow(silent) {
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(wf) });
   renderWorkflows(res.workflows, wf.id);
   setDirty(false);
+  scheduleEstimate();
   if (!silent) toast("Saved.");
 }
 async function validateWorkflow() {
@@ -466,10 +580,11 @@ function initEditor() {
   editor.reroute = true;
   editor.start();
   window.editor = editor;  // exposed for debugging/automation
-  editor.on("nodeSelected", id => showProps(dfToCf[id]));
+  editor.on("nodeSelected", id => { clearMultiSel(); showProps(dfToCf[id]); });
   editor.on("nodeUnselected", () => showProps(null));
   editor.on("nodeRemoved", id => { const cf = dfToCf[id]; delete dfToCf[id]; delete cfToDf[cf];
     if (selected === cf) showProps(null); setDirty(true); });
+  editor.on("nodeMoved", () => { if (!suppressCycle) setDirty(true); });  // persist positions
   editor.on("connectionRemoved", () => { if (!suppressCycle) setDirty(true); });
   editor.on("connectionCreated", info => {
     if (suppressCycle) return;
@@ -483,11 +598,84 @@ function initEditor() {
   });
 }
 
+// ---------- box (rubber-band) multi-select + multi-delete ----------
+let multiSel = new Set();   // cf ids currently box-selected
+function clearMultiSel() {
+  multiSel.forEach(cf => { const el = $(`#node-${cfToDf[cf]}`); if (el) el.classList.remove("multi-sel"); });
+  multiSel.clear();
+}
+function markMulti(cf, on) {
+  const el = $(`#node-${cfToDf[cf]}`); if (!el) return;
+  el.classList.toggle("multi-sel", on);
+  if (on) multiSel.add(cf); else multiSel.delete(cf);
+}
+function deleteMultiSel() {
+  if (!multiSel.size) return;
+  const ids = [...multiSel];
+  clearMultiSel();
+  ids.forEach(cf => { const df = cfToDf[cf]; if (df != null) editor.removeNodeId("node-" + df); });
+  showProps(null);
+  toast(ids.length + " node(s) deleted");
+}
+function initBoxSelect() {
+  const host = $("#drawflow");
+  let selecting = false, start = null, boxEl = null;
+  const boxRect = (x, y) => ({
+    l: Math.min(start.x, x), t: Math.min(start.y, y),
+    r: Math.max(start.x, x), b: Math.max(start.y, y),
+  });
+  function updateBox(x, y) {
+    const { l, t, r, b } = boxRect(x, y);
+    boxEl.style.left = l + "px"; boxEl.style.top = t + "px";
+    boxEl.style.width = (r - l) + "px"; boxEl.style.height = (b - t) + "px";
+    Object.keys(cfToDf).forEach(cf => {
+      const el = $(`#node-${cfToDf[cf]}`); if (!el) return;
+      const nr = el.getBoundingClientRect();
+      markMulti(cf, nr.left < r && nr.right > l && nr.top < b && nr.bottom > t);
+    });
+  }
+  host.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    // clicks on a node / connector go to Drawflow (drag node, draw edge)
+    if (e.target.closest(".drawflow-node") || e.target.closest(".connection")) return;
+    // empty canvas: start a selection box, and block Drawflow's canvas-pan
+    selecting = true; e.stopPropagation(); e.preventDefault();
+    start = { x: e.clientX, y: e.clientY };
+    boxEl = document.createElement("div"); boxEl.className = "sel-box";
+    document.body.appendChild(boxEl);
+    updateBox(e.clientX, e.clientY);
+  }, true);
+  window.addEventListener("mousemove", e => { if (selecting) updateBox(e.clientX, e.clientY); });
+  window.addEventListener("mouseup", () => {
+    if (!selecting) return; selecting = false;
+    if (boxEl) { boxEl.remove(); boxEl = null; }
+    if (multiSel.size) toast(multiSel.size + " selected - press Delete to remove");
+  });
+  // Delete removes the whole box selection (capture beats Drawflow's own handler)
+  window.addEventListener("keydown", e => {
+    if ($("#view-design").hidden || !multiSel.size) return;
+    const t = e.target.tagName; if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault(); e.stopImmediatePropagation(); deleteMultiSel();
+    }
+  }, true);
+}
+
 async function boot_load() {
   boot = await api("/api/bootstrap");
   renderEnv(); renderAuth();
   const id = renderWorkflows();
   if (id) await openWorkflow(id);
+  if (!boot.auth || !boot.auth.checked) pollAuthUntilReady();  // resolve gcloud auth in background
+}
+async function pollAuthUntilReady() {
+  for (let i = 0; i < 8; i++) {
+    await sleep(1200);
+    try {
+      const a = await api("/api/auth");
+      if (a && a.checked) { boot.auth = a; renderAuth(); return; }
+    } catch (e) { /* keep trying */ }
+  }
 }
 
 function wire() {
@@ -540,6 +728,19 @@ function wire() {
   $("#consoleClear").onclick = () => { $("#console").innerHTML = ""; };
   $("#delNodeBtn").onclick = () => { if (selected != null) { editor.removeNodeId("node-" + cfToDf[selected]); showProps(null); } };
   $("#saveSettingsBtn").onclick = saveSettings;
+  // undo / redo + collapsible side panels
+  $("#undoBtn").onclick = undo;
+  $("#redoBtn").onclick = redo;
+  $("#toggleLeft").onclick = e => togglePanel(".sidebar", e.currentTarget);
+  $("#toggleRight").onclick = e => togglePanel(".rightbar", e.currentTarget);
+  document.addEventListener("keydown", e => {
+    const t = (e.target.tagName || "");
+    if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return;  // let fields do native undo
+    if ($("#view-design").hidden) return;                            // only on the designer
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if ((e.ctrlKey || e.metaKey) && (k === "y" || (e.shiftKey && k === "z"))) { e.preventDefault(); redo(); }
+  });
   // primary nav tabs
   $$("#nav .nav-btn").forEach(b => b.onclick = () => showView(b.dataset.view));
   // history filters
@@ -610,6 +811,6 @@ function autoLayout() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  initEditor(); wire(); initConsoleResize(); setConsoleFont(consoleFont);
+  initEditor(); wire(); initConsoleResize(); setConsoleFont(consoleFont); restorePanelState(); initBoxSelect();
   try { await boot_load(); } catch (e) { alert("Failed to load app: " + e.message); }
 });

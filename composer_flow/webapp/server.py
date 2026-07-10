@@ -30,7 +30,11 @@ _auth_cache: dict = {"checked": False, "authenticated": False, "account": "", "e
 _auth_lock = threading.Lock()
 
 
+_auth_checking = threading.Event()
+
+
 def _auth_status(force: bool = False) -> dict:
+    """Blocking auth check (subprocess). Used by /api/auth."""
     with _auth_lock:
         if _auth_cache["checked"] and not force:
             return dict(_auth_cache)
@@ -46,6 +50,22 @@ def _auth_status(force: bool = False) -> dict:
     return dict(result)
 
 
+def _auth_cached() -> dict:
+    """Non-blocking: return the cached result immediately (may be unchecked)."""
+    with _auth_lock:
+        return dict(_auth_cache)
+
+
+def kickoff_auth_check() -> None:
+    """Run the (slow) gcloud auth check once in the background so the first
+    page load is not blocked waiting on a subprocess."""
+    if _auth_checking.is_set():
+        return
+    _auth_checking.set()
+    threading.Thread(target=lambda: _auth_status(force=True),
+                     name="auth-check", daemon=True).start()
+
+
 def _target_dict() -> dict:
     t = appstate.target()
     return {"environment": t.environment, "location": t.location,
@@ -59,11 +79,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_json(self, obj, status=200) -> None:
         body = json.dumps(obj).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionError, OSError):
+            # Client aborted (navigated away / fetch timed out) - ignore quietly.
+            pass
+
+    def handle_one_request(self):
+        # Swallow client-disconnect resets so they never surface as tracebacks.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionError, OSError):
+            self.close_connection = True
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
@@ -109,7 +140,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/workflow":
                 self._api_get_workflow(qs.get("id", [""])[0])
             elif path == "/api/auth":
-                self._send_json(_auth_status(force=qs.get("force", ["0"])[0] == "1"))
+                if qs.get("force", ["0"])[0] == "1":
+                    self._send_json(_auth_status(force=True))   # explicit re-check (blocks)
+                else:
+                    kickoff_auth_check()                        # ensure a check is running
+                    self._send_json(_auth_cached())             # non-blocking: cache only
             elif path == "/api/run-state":
                 self._send_json(appstate.run_state_snapshot())
             elif path == "/api/history":
@@ -136,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_import_workflow(body)
             elif path == "/api/validate":
                 self._api_validate(body)
+            elif path == "/api/estimate":
+                self._api_estimate(body)
             elif path == "/api/settings/save":
                 self._api_save_settings(body)
             elif path == "/api/profile":
@@ -159,12 +196,15 @@ class Handler(BaseHTTPRequestHandler):
     # -- API handlers ----------------------------------------------------- #
 
     def _api_bootstrap(self) -> None:
+        # Start the gcloud auth check in the background and return immediately
+        # with whatever is cached - the page must not wait on a subprocess.
+        kickoff_auth_check()
         s = appstate.settings()
         self._send_json({
             "profiles": list(ENVIRONMENT_PROFILES),
             "active_profile": appstate.active_profile(),
             "target": _target_dict(),
-            "auth": _auth_status(),
+            "auth": _auth_cached(),
             "settings": s.all(),
             "workflows": appstate.workflows().list_summaries(),
         })
@@ -174,8 +214,10 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(wf.to_dict() if wf else {})
 
     def _api_save_workflow(self, body: dict) -> None:
+        # Autosave fires often; skip per-save version snapshots (the web app
+        # has client-side undo) to keep saves fast and lock-free.
         wf = Workflow.from_dict(body)
-        appstate.workflows().save(wf)
+        appstate.workflows().save(wf, snapshot_version=False)
         self._send_json({"ok": True, "id": wf.id,
                          "workflows": appstate.workflows().list_summaries()})
 
@@ -210,6 +252,29 @@ class Handler(BaseHTTPRequestHandler):
         issues = [{"level": i.level, "message": i.message} for i in g.validate(wf)]
         self._send_json({"issues": issues,
                          "ok": not any(i["level"] == "error" for i in issues)})
+
+    def _api_estimate(self, body: dict) -> None:
+        """Estimated total run time from past successful runs. Wave-aware: DAGs
+        in the same parallel wave overlap, so each wave costs the SLOWEST DAG in
+        it and the total is the sum of wave costs (an approximate wall-clock)."""
+        wf = Workflow.from_dict(body)
+        exec_repo = appstate.executions()
+        avg = {n.id: exec_repo.average_dag_duration(n.dag_id) for n in wf.nodes}
+        try:
+            levels = g.topological_levels(wf)
+        except ValueError:
+            self._send_json({"has_estimate": False, "seconds": 0,
+                             "known": 0, "unknown": len(wf.nodes)})
+            return
+        total, known, unknown = 0.0, 0, 0
+        for level in levels:
+            durs = [avg[nid] for nid in level if avg[nid]]
+            unknown += sum(1 for nid in level if not avg[nid])
+            if durs:
+                total += max(durs)
+                known += len(durs)
+        self._send_json({"has_estimate": known > 0, "seconds": round(total, 1),
+                         "known": known, "unknown": unknown})
 
     def _api_save_settings(self, body: dict) -> None:
         s = appstate.settings()
