@@ -58,6 +58,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "cli_retry_count": "2",
     "cli_retry_backoff_seconds": "5",
     "confirm_before_run": "1",
+    # keep Windows awake while a workflow is executing (prevents sleep from
+    # freezing the polling of a long run)
+    "keep_awake_during_run": "1",
 }
 
 for _name, _vals in HARDCODED_PROFILES.items():

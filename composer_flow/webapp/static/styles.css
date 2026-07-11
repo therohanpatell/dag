@@ -60,11 +60,25 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* layout */
 .layout { display: flex; flex: 1; min-height: 0; }
-.sidebar { width: 244px; padding: 14px; overflow-y: auto; border-right: 1px solid var(--border);
-  background: var(--bg); display: flex; flex-direction: column; gap: 14px; }
-.rightbar { width: 320px; padding: 14px; overflow-y: auto; border-left: 1px solid var(--border);
-  background: var(--bg); display: flex; flex-direction: column; gap: 14px; }
+.sidebar { width: 244px; border-right: 1px solid var(--border); background: var(--bg); }
+.rightbar { width: 320px; border-left: 1px solid var(--border); background: var(--bg); }
 .canvas-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+
+/* collapsible side panels (header + body; collapse to a thin rail) */
+.side-panel { display: flex; flex-direction: column; padding: 10px; overflow: hidden;
+  transition: width .15s ease; flex-shrink: 0; min-width: 0; }
+.side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 7px 10px; cursor: pointer; font-weight: 700; color: var(--ink); font-size: 12.5px;
+  background: #eef2f4; border-radius: 8px; user-select: none; }
+.side-head:hover { background: #e6ecee; }
+.side-head .side-chev { color: var(--muted); transition: transform .18s; }
+.side-body { display: flex; flex-direction: column; gap: 14px; overflow-y: auto;
+  margin-top: 12px; flex: 1; min-height: 0; }
+.side-panel.collapsed { width: 40px; min-width: 40px; max-width: 40px; flex: 0 0 40px; }
+.side-panel.collapsed .side-body { display: none; }
+.side-panel.collapsed .side-head { writing-mode: vertical-rl; height: 100%; justify-content: center; gap: 10px; }
+#leftPanel.collapsed .side-head .side-chev { transform: rotate(180deg); }
+#rightPanel.collapsed .side-head .side-chev { transform: rotate(180deg); }
 
 /* panels */
 .panel { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px;
@@ -112,7 +126,10 @@ input:focus, select:focus { outline: none; border-color: var(--accent);
 .spacer { flex: 1; }
 .drawflow-host { flex: 1; background: var(--canvas);
   background-image: radial-gradient(#d5dde1 1.1px, transparent 1.1px);
-  background-size: 22px 22px; }
+  background-size: 22px 22px; cursor: grab; }
+.drawflow-host:active { cursor: grabbing; }
+.drawflow-host.mode-select { cursor: crosshair; }
+.drawflow-host .drawflow-node { cursor: move; }
 
 /* run strip */
 .run-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px;

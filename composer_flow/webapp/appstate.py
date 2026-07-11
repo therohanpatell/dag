@@ -7,6 +7,8 @@ copies engine events into `run_state` so the browser can poll for live status.
 """
 from __future__ import annotations
 
+import ctypes
+import sys
 import threading
 
 from composer_flow.config import ENVIRONMENT_PROFILES
@@ -84,6 +86,28 @@ def target() -> ComposerTarget:
     return ComposerTarget(environment=env, location=loc, project=proj)
 
 
+# --- keep the machine awake during a run --------------------------------- #
+# Windows: SetThreadExecutionState. The flags persist for the CALLING THREAD
+# until reset or the thread exits, so this MUST be called from the long-lived
+# drain thread that lives for the whole run.
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+_ES_DISPLAY_REQUIRED = 0x00000002
+
+
+def set_keep_awake(on: bool) -> None:
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        flags = _ES_CONTINUOUS
+        if on:
+            flags |= _ES_SYSTEM_REQUIRED | _ES_DISPLAY_REQUIRED
+        ctypes.windll.kernel32.SetThreadExecutionState(flags)
+        log.info("Keep-awake %s", "ON" if on else "OFF")
+    except Exception as exc:
+        log.warning("Could not set keep-awake: %s", exc)
+
+
 # --- execution control --------------------------------------------------- #
 
 def run_state_snapshot() -> dict:
@@ -143,29 +167,36 @@ def cancel_run() -> None:
 def _drain_loop(engine: WorkflowEngine) -> None:
     import queue as _queue
 
-    while True:
-        try:
-            event = engine.events.get(timeout=0.5)
-        except _queue.Empty:
-            if not engine.is_running() and engine.events.empty():
-                break
-            continue
+    awake = settings().get("keep_awake_during_run") != "0"
+    if awake:
+        set_keep_awake(True)   # stop Windows sleeping mid-run
+    try:
+        while True:
+            try:
+                event = engine.events.get(timeout=0.5)
+            except _queue.Empty:
+                if not engine.is_running() and engine.events.empty():
+                    break
+                continue
+            with _run_lock:
+                if event.type == ev.NODE_STATUS:
+                    _run_state["statuses"][event.node_id] = event.status
+                elif event.type == ev.LOG:
+                    _run_state["log"].append({"level": event.level, "message": event.message})
+                elif event.type == ev.PROGRESS:
+                    _run_state["progress"] = {"done": event.done, "total": event.total}
+                elif event.type == ev.ETA:
+                    _run_state["eta"] = event.text
+                elif event.type == ev.FINISHED:
+                    _run_state["final_status"] = event.status
+                    _run_state["error"] = event.error
+                if not _run_state["execution_id"] and engine.execution_id:
+                    _run_state["execution_id"] = engine.execution_id
+    finally:
         with _run_lock:
-            if event.type == ev.NODE_STATUS:
-                _run_state["statuses"][event.node_id] = event.status
-            elif event.type == ev.LOG:
-                _run_state["log"].append({"level": event.level, "message": event.message})
-            elif event.type == ev.PROGRESS:
-                _run_state["progress"] = {"done": event.done, "total": event.total}
-            elif event.type == ev.ETA:
-                _run_state["eta"] = event.text
-            elif event.type == ev.FINISHED:
-                _run_state["final_status"] = event.status
-                _run_state["error"] = event.error
+            _run_state["running"] = False
             if not _run_state["execution_id"] and engine.execution_id:
                 _run_state["execution_id"] = engine.execution_id
-    with _run_lock:
-        _run_state["running"] = False
-        if not _run_state["execution_id"] and engine.execution_id:
-            _run_state["execution_id"] = engine.execution_id
+        if awake:
+            set_keep_awake(False)
     log.info("Run drainer finished for execution %s", engine.execution_id)

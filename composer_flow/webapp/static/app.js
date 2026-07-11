@@ -110,21 +110,24 @@ function redo() {
   toast("Redo");
 }
 
-// ---------- collapsible side panels ----------
-function togglePanel(sel, btn) {
-  const el = $(sel); if (!el) return;
-  el.hidden = !el.hidden;
-  if (btn) btn.classList.toggle("active", !el.hidden);
-  try { localStorage.setItem("cf_panel_" + sel, el.hidden ? "1" : "0"); } catch (e) {}
+// ---------- collapsible side panels (collapse to a thin rail, like console) --
+function setSide(side, collapsed) {
+  const el = side === "left" ? $("#leftPanel") : $("#rightPanel");
+  if (el) el.classList.toggle("collapsed", collapsed);
+  try { localStorage.setItem("cf_side_" + side, collapsed ? "1" : "0"); } catch (e) {}
 }
-function restorePanelState() {
-  [[".sidebar", "#toggleLeft"], [".rightbar", "#toggleRight"]].forEach(([sel, bsel]) => {
-    let hidden = false;
-    try { hidden = localStorage.getItem("cf_panel_" + sel) === "1"; } catch (e) {}
-    const el = $(sel), btn = $(bsel);
-    if (el) el.hidden = hidden;
-    if (btn) btn.classList.toggle("active", !hidden);
+function toggleSide(side) {
+  const el = side === "left" ? $("#leftPanel") : $("#rightPanel");
+  setSide(side, !(el && el.classList.contains("collapsed")));
+}
+function restoreSideState() {
+  ["left", "right"].forEach(side => {
+    let collapsed = false;
+    try { collapsed = localStorage.getItem("cf_side_" + side) === "1"; } catch (e) {}
+    setSide(side, collapsed);
   });
+  // clicking the panel header also collapses/expands it
+  $$(".side-head").forEach(h => h.onclick = () => toggleSide(h.dataset.side));
 }
 
 // ---------- Drawflow canvas ----------
@@ -397,8 +400,18 @@ function applyRunState(st) {
     else toast("Workflow " + st.final_status);
   }
 }
+let wakeLock = null;
+async function acquireWakeLock() {
+  try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+function releaseWakeLock() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
+// re-acquire if the tab was hidden/suspended and comes back during a run
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && pollTimer && !wakeLock) acquireWakeLock();
+});
 function startPolling() {
   $("#runStrip").hidden = false; $("#runBtn").disabled = true; $("#stopBtn").disabled = false;
+  acquireWakeLock();
   const tick = async () => {
     try { applyRunState(await api("/api/run-state")); } catch (e) {}
   };
@@ -406,6 +419,7 @@ function startPolling() {
 }
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer); pollTimer = null;
+  releaseWakeLock();
   $("#runBtn").disabled = false; $("#stopBtn").disabled = true;
 }
 
@@ -473,12 +487,16 @@ function openSettings() {
       <label>Trigger command timeout (s)</label><input data-k="trigger_timeout_seconds" value="${s.trigger_timeout_seconds}" />
       <label>Max parallel DAGs</label><input data-k="max_parallel_dags" value="${s.max_parallel_dags}" />
       <label>CLI retries (transient errors)</label><input data-k="cli_retry_count" value="${s.cli_retry_count}" />
+      <label>Keep this PC awake while a workflow runs</label>
+      <label class="switch"><input type="checkbox" data-kb="keep_awake_during_run"
+        ${s.keep_awake_during_run !== "0" ? "checked" : ""} /> Prevent sleep during a run</label>
     </div></div>`;
   body.innerHTML = html;
 }
 async function saveSettings() {
   const payload = {};
   $$("#settingsBody [data-k]").forEach(i => (payload[i.dataset.k] = i.value.trim()));
+  $$("#settingsBody [data-kb]").forEach(i => (payload[i.dataset.kb] = i.checked ? "1" : "0"));
   const res = await api("/api/settings/save", { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   Object.assign(boot.settings, payload); boot.target = res.target;
@@ -598,6 +616,18 @@ function initEditor() {
   });
 }
 
+// ---------- canvas mode: pan (default) vs box-select ----------
+let selectMode = "pan";   // "pan" = drag moves the canvas; "select" = box-select
+function setMode(m) {
+  selectMode = m;
+  const btn = $("#modeBtn");
+  if (btn) {
+    btn.classList.toggle("active", m === "select");
+    btn.querySelector(".mode-label").textContent = m === "select" ? "Select" : "Pan";
+  }
+  $("#drawflow").classList.toggle("mode-select", m === "select");
+}
+
 // ---------- box (rubber-band) multi-select + multi-delete ----------
 let multiSel = new Set();   // cf ids currently box-selected
 function clearMultiSel() {
@@ -636,6 +666,7 @@ function initBoxSelect() {
   }
   host.addEventListener("mousedown", e => {
     if (e.button !== 0) return;
+    if (selectMode !== "select") return;   // pan mode: let Drawflow move the canvas
     // clicks on a node / connector go to Drawflow (drag node, draw edge)
     if (e.target.closest(".drawflow-node") || e.target.closest(".connection")) return;
     // empty canvas: start a selection box, and block Drawflow's canvas-pan
@@ -731,8 +762,7 @@ function wire() {
   // undo / redo + collapsible side panels
   $("#undoBtn").onclick = undo;
   $("#redoBtn").onclick = redo;
-  $("#toggleLeft").onclick = e => togglePanel(".sidebar", e.currentTarget);
-  $("#toggleRight").onclick = e => togglePanel(".rightbar", e.currentTarget);
+  $("#modeBtn").onclick = () => setMode(selectMode === "select" ? "pan" : "select");
   document.addEventListener("keydown", e => {
     const t = (e.target.tagName || "");
     if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return;  // let fields do native undo
@@ -811,6 +841,7 @@ function autoLayout() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  initEditor(); wire(); initConsoleResize(); setConsoleFont(consoleFont); restorePanelState(); initBoxSelect();
+  initEditor(); wire(); initConsoleResize(); setConsoleFont(consoleFont);
+  restoreSideState(); initBoxSelect(); setMode("pan");
   try { await boot_load(); } catch (e) { alert("Failed to load app: " + e.message); }
 });
